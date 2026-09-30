@@ -1,6 +1,8 @@
 const router = require('express').Router();
 const { query, transaction } = require('../db');
 const { ah, parse, z, zId, zIdOpt, zMoney, zTextOpt, round2, HttpError } = require('../util');
+const { exigir } = require('../auth');
+const { registrar } = require('../auditoria');
 
 /**
  * Registra uma movimentação e atualiza o estoque do produto.
@@ -69,6 +71,7 @@ async function registrarMovimentacao(client, mov) {
 
 router.get(
   '/movimentacoes',
+  exigir('estoque.movimentar', 'produtos.editar'),
   ah(async (req, res) => {
     const { produto_id, tipo, de, ate } = req.query;
     const where = [];
@@ -137,15 +140,26 @@ const schemaMov = z.discriminatedUnion('tipo', [
 
 router.post(
   '/movimentacoes',
+  exigir('estoque.movimentar'),
   ah(async (req, res) => {
     const d = parse(schemaMov, req.body);
-    const mov = await transaction((client) =>
-      registrarMovimentacao(client, {
+    // Quem não vê custos não altera o custo médio
+    if (!req.pode('custos.ver')) delete d.custo_unitario;
+    const mov = await transaction(async (client) => {
+      const m = await registrarMovimentacao(client, {
         ...d,
         motivo: d.tipo === 'ajuste' ? 'inventario' : d.motivo,
         usuario_id: req.usuario.id,
-      })
-    );
+      });
+      if (m) {
+        await registrar(client, req, `estoque_${m.tipo}`, {
+          entidade: 'produto',
+          entidadeId: m.produto_id,
+          detalhes: { motivo: m.motivo, quantidade: m.quantidade, saldo: `${m.estoque_anterior} → ${m.estoque_posterior}`, documento: m.documento },
+        });
+      }
+      return m;
+    });
     if (!mov) return res.json({ aviso: 'Nenhuma alteração (produto sem controle de estoque ou quantidade igual)' });
     res.status(201).json(mov);
   })
@@ -154,6 +168,7 @@ router.post(
 // Entrada de nota de compra com vários itens de uma vez
 router.post(
   '/entrada-lote',
+  exigir('estoque.movimentar'),
   ah(async (req, res) => {
     const d = parse(
       z.object({
@@ -166,6 +181,7 @@ router.post(
       }),
       req.body
     );
+    if (!req.pode('custos.ver')) d.itens.forEach((i) => delete i.custo_unitario);
     const movs = await transaction(async (client) => {
       const out = [];
       for (const item of d.itens) {
@@ -181,7 +197,11 @@ router.post(
           })
         );
       }
-      return out.filter(Boolean);
+      const feitas = out.filter(Boolean);
+      await registrar(client, req, 'estoque_nota', {
+        detalhes: { documento: d.documento, itens: feitas.length, unidades: feitas.reduce((s, m) => s + m.quantidade, 0) },
+      });
+      return feitas;
     });
     res.status(201).json(movs);
   })
@@ -190,6 +210,7 @@ router.post(
 // Valor do estoque (custo e venda) por categoria
 router.get(
   '/resumo',
+  exigir('estoque.movimentar'),
   ah(async (_req, res) => {
     const { rows } = await query(
       `select categoria,

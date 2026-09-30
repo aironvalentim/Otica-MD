@@ -3,6 +3,7 @@ import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Printer, Ban, CheckCircle2, ShoppingCart, Wrench } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useApi, useLojaConfig } from '../../lib/hooks';
+import { useAuth } from '../../lib/auth';
 import { FORMAS_PAGAMENTO, cpf, data, dataHora, moeda, telefone } from '../../lib/format';
 import { Botao, Cabecalho, Campo, Cartao, Erro, Etiqueta, Modal, useToast } from '../../components/admin/ui';
 
@@ -13,6 +14,7 @@ export default function VendaDetalhe() {
   const cfg = useLojaConfig();
   const { dados: v, recarregar } = useApi(`/vendas/${id}`);
   const [cancelar, setCancelar] = useState(false);
+  const { pode } = useAuth();
   const [motivo, setMotivo] = useState('');
   const [erro, setErro] = useState('');
   const [salvando, setSalvando] = useState(false);
@@ -50,7 +52,7 @@ export default function VendaDetalhe() {
       )}
       <div className="nao-imprimir">
         <Cabecalho titulo={`Venda #${v.id}`} subtitulo={dataHora(v.criado_em)}>
-          {v.status === 'concluida' && (
+          {v.status === 'concluida' && pode('vendas.cancelar') && (
             <Botao variante="secundario" onClick={() => setCancelar(true)}>
               <Ban size={16} /> Cancelar venda
             </Botao>
@@ -62,7 +64,9 @@ export default function VendaDetalhe() {
       </div>
 
       {v.status === 'cancelada' && (
-        <div className="nao-imprimir mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-800">Venda cancelada em {dataHora(v.cancelada_em)}.</div>
+        <div className="nao-imprimir mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-800">
+          Venda cancelada em {dataHora(v.cancelada_em)}.
+        </div>
       )}
 
       <Cartao className="imprimir mx-auto max-w-2xl">
@@ -73,7 +77,9 @@ export default function VendaDetalhe() {
           <p className="mt-3 text-sm font-semibold">
             Comprovante de venda #{v.id} {v.status === 'cancelada' && <Etiqueta cor="red">CANCELADA</Etiqueta>}
           </p>
-          <p className="text-xs text-slate-500">{dataHora(v.criado_em)} · Atendido por {v.vendedor_nome}</p>
+          <p className="text-xs text-slate-500">
+            {dataHora(v.criado_em)} · Atendido por {v.vendedor_nome}
+          </p>
           <p className="mt-1 text-[11px] text-slate-400">Documento sem valor fiscal</p>
         </div>
 
@@ -136,7 +142,9 @@ export default function VendaDetalhe() {
                     </td>
                     <td className="py-1">vence {data(p.vencimento)}</td>
                     <td className="py-1 text-right tabular-nums">{moeda(p.valor)}</td>
-                    <td className="py-1 text-right text-xs">{p.status === 'paga' ? 'PAGA' : p.status === 'cancelada' ? 'CANCELADA' : '______'}</td>
+                    <td className="py-1 text-right text-xs">
+                      {p.status === 'paga' ? 'PAGA' : p.status === 'cancelada' ? 'CANCELADA' : '______'}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -165,7 +173,13 @@ export default function VendaDetalhe() {
         <div className="mt-3">
           <Erro>{erro}</Erro>
         </div>
-        <Botao variante="perigo" className="mt-3 w-full" disabled={motivo.trim().length < 3} carregando={salvando} onClick={confirmarCancelamento}>
+        <Botao
+          variante="perigo"
+          className="mt-3 w-full"
+          disabled={motivo.trim().length < 3}
+          carregando={salvando}
+          onClick={confirmarCancelamento}
+        >
           Confirmar cancelamento
         </Botao>
       </Modal>

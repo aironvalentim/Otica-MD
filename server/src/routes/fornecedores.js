@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const { query } = require('../db');
 const { ah, parse, z, zId, zTextOpt, buildUpdate, HttpError } = require('../util');
+const { exigir } = require('../auth');
 
 const schema = z.object({
   nome: z.string().trim().min(2),
@@ -28,6 +29,7 @@ router.get(
 
 router.post(
   '/',
+  exigir('config.loja'),
   ah(async (req, res) => {
     const d = parse(schema, req.body);
     const { rows } = await query(
@@ -40,6 +42,7 @@ router.post(
 
 router.put(
   '/:id',
+  exigir('config.loja'),
   ah(async (req, res) => {
     const id = parse(zId, req.params.id);
     const d = parse(schema.partial(), req.body);
@@ -54,6 +57,7 @@ router.put(
 
 router.delete(
   '/:id',
+  exigir('config.loja'),
   ah(async (req, res) => {
     const id = parse(zId, req.params.id);
     await query('delete from fornecedores where id = $1', [id]);

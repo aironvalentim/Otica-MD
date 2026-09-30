@@ -3,7 +3,8 @@ const bcrypt = require('bcryptjs');
 const rateLimit = require('express-rate-limit');
 const { query } = require('../db');
 const { ah, parse, z, HttpError } = require('../util');
-const { assinarToken, autenticar } = require('../auth');
+const { assinarToken, autenticar, carregarUsuario } = require('../auth');
+const { registrar } = require('../auditoria');
 
 const limiteLogin = rateLimit({ windowMs: 15 * 60 * 1000, limit: 20, message: { erro: 'Muitas tentativas. Tente em 15 minutos' } });
 
@@ -12,15 +13,20 @@ router.post(
   limiteLogin,
   ah(async (req, res) => {
     const { email, senha } = parse(z.object({ email: z.string().trim().toLowerCase().email(), senha: z.string().min(1) }), req.body);
-    const { rows } = await query('select * from usuarios where email = $1 and ativo', [email]);
-    const usuario = rows[0];
-    if (!usuario || !(await bcrypt.compare(senha, usuario.senha_hash))) {
+    const { rows } = await query('select * from usuarios where email = $1', [email]);
+    const u = rows[0];
+    const ok = u && (await bcrypt.compare(senha, u.senha_hash));
+    if (!ok) {
+      await registrar({ query }, { ip: req.ip, usuario: u ? { id: u.id, nome: u.nome } : null }, 'login_falhou', {
+        detalhes: { email },
+      });
       throw new HttpError(401, 'E-mail ou senha incorretos');
     }
-    res.json({
-      token: assinarToken(usuario),
-      usuario: { id: usuario.id, nome: usuario.nome, email: usuario.email, papel: usuario.papel },
-    });
+    if (!u.ativo) throw new HttpError(401, 'Usuário desativado. Fale com o administrador');
+    const usuario = await carregarUsuario(u.id);
+    await query('update usuarios set ultimo_acesso = now() where id = $1', [u.id]);
+    await registrar({ query }, { ip: req.ip, usuario }, 'login');
+    res.json({ token: assinarToken(usuario), usuario });
   })
 );
 
@@ -28,9 +34,24 @@ router.get(
   '/me',
   autenticar,
   ah(async (req, res) => {
-    const { rows } = await query('select id, nome, email, papel from usuarios where id = $1 and ativo', [req.usuario.id]);
-    if (!rows[0]) throw new HttpError(401, 'Usuário desativado');
-    res.json(rows[0]);
+    res.json(req.usuario);
+  })
+);
+
+// Cada pessoa troca a própria senha
+router.post(
+  '/senha',
+  autenticar,
+  ah(async (req, res) => {
+    const d = parse(
+      z.object({ atual: z.string().min(1), nova: z.string().min(8, 'A nova senha precisa de pelo menos 8 caracteres') }),
+      req.body
+    );
+    const { rows } = await query('select senha_hash from usuarios where id = $1', [req.usuario.id]);
+    if (!(await bcrypt.compare(d.atual, rows[0].senha_hash))) throw new HttpError(400, 'Senha atual incorreta');
+    await query('update usuarios set senha_hash = $1 where id = $2', [await bcrypt.hash(d.nova, 10), req.usuario.id]);
+    await registrar({ query }, req, 'senha_alterada', { entidade: 'usuario', entidadeId: req.usuario.id });
+    res.json({ ok: true });
   })
 );
 

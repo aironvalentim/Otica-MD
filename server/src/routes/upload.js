@@ -4,6 +4,7 @@ const fs = require('fs');
 const crypto = require('crypto');
 const multer = require('multer');
 const { ah, HttpError } = require('../util');
+const { exigir } = require('../auth');
 
 const TIPOS = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp' };
 
@@ -23,6 +24,7 @@ const PASTA_LOCAL = path.join(__dirname, '..', '..', 'uploads');
 
 router.post(
   '/',
+  exigir('produtos.editar'),
   upload.array('arquivos', 10),
   ah(async (req, res) => {
     if (!req.files?.length) throw new HttpError(400, 'Nenhum arquivo enviado');

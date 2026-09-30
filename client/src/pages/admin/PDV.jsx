@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Minus, Plus, Trash2, UserPlus, X, Wallet, Search, FilePlus2 } from 'lucide-react';
 import { api, qs } from '../../lib/api';
 import { useApi, useDebounce } from '../../lib/hooks';
+import { useAuth } from '../../lib/auth';
 import { FORMAS_PAGAMENTO, data, moeda, precoFinal, telefone } from '../../lib/format';
 import { Botao, Cabecalho, Campo, Cartao, Erro, Modal, useToast } from '../../components/admin/ui';
 import ProdutoBusca from '../../components/admin/ProdutoBusca';
@@ -17,7 +18,10 @@ function ClienteBusca({ onSelecionar, onNovo }) {
   const [itens, setItens] = useState([]);
   useEffect(() => {
     if (!b.trim()) return setItens([]);
-    api.get(`/clientes${qs({ busca: b })}`).then((r) => setItens(r.slice(0, 6))).catch(() => {});
+    api
+      .get(`/clientes${qs({ busca: b })}`)
+      .then((r) => setItens(r.slice(0, 6)))
+      .catch(() => {});
   }, [b]);
   return (
     <div className="relative">
@@ -78,7 +82,11 @@ export default function PDV() {
   // Cliente vindo da ficha (?cliente=ID)
   useEffect(() => {
     const id = params.get('cliente');
-    if (id) api.get(`/clientes/${id}`).then(escolherCliente).catch(() => {});
+    if (id)
+      api
+        .get(`/clientes/${id}`)
+        .then(escolherCliente)
+        .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -94,11 +102,22 @@ export default function PDV() {
     setItens((l) => {
       const idx = l.findIndex((i) => i.produto_id === p.id);
       if (idx >= 0) return l.map((i, n) => (n === idx ? { ...i, quantidade: i.quantidade + 1 } : i));
-      return [...l, { chave: `p${p.id}`, produto_id: p.id, descricao: [p.nome, p.cor].filter(Boolean).join(' - '), quantidade: 1, preco_unitario: precoFinal(p), produto: p }];
+      return [
+        ...l,
+        {
+          chave: `p${p.id}`,
+          produto_id: p.id,
+          descricao: [p.nome, p.cor].filter(Boolean).join(' - '),
+          quantidade: 1,
+          preco_unitario: precoFinal(p),
+          produto: p,
+        },
+      ];
     });
     if (p.categoria === 'lente') setGerarOS(true);
   };
-  const addAvulso = () => setItens((l) => [...l, { chave: `a${Date.now()}`, produto_id: null, descricao: '', quantidade: 1, preco_unitario: 0 }]);
+  const addAvulso = () =>
+    setItens((l) => [...l, { chave: `a${Date.now()}`, produto_id: null, descricao: '', quantidade: 1, preco_unitario: 0 }]);
   const setItem = (chave, k, v) => setItens((l) => l.map((i) => (i.chave === chave ? { ...i, [k]: v } : i)));
   const removerItem = (chave) => setItens((l) => l.filter((i) => i.chave !== chave));
 
@@ -108,12 +127,29 @@ export default function PDV() {
   const pago = r2(pagamentos.reduce((s, p) => s + Number(p.valor || 0), 0));
   const restante = r2(total - pago);
 
+  // Limite de desconto do perfil: conta o desconto geral e o preço reduzido item a item
+  const { usuario } = useAuth();
+  const limiteDesconto = Number(usuario?.desconto_max_pct ?? 0);
+  const valorTabela = itens.reduce(
+    (s, i) => s + Number(i.quantidade || 0) * (i.produto ? Number(precoFinal(i.produto)) : Number(i.preco_unitario || 0)),
+    0,
+  );
+  const descontoItens = itens.reduce(
+    (s, i) => s + (i.produto ? Math.max(0, Number(precoFinal(i.produto)) - Number(i.preco_unitario || 0)) * Number(i.quantidade || 0) : 0),
+    0,
+  );
+  const pctDesconto = valorTabela > 0 ? ((valorDesconto + descontoItens) / valorTabela) * 100 : 0;
+  const acimaDoLimite = pctDesconto > limiteDesconto + 0.001;
+
   const addPagamento = (forma) =>
-    setPagamentos((l) => [...l, { chave: Date.now(), forma, valor: restante > 0 ? restante : '', parcelas: forma === 'crediario' ? 3 : 1, primeiro_vencimento: '' }]);
+    setPagamentos((l) => [
+      ...l,
+      { chave: Date.now(), forma, valor: restante > 0 ? restante : '', parcelas: forma === 'crediario' ? 3 : 1, primeiro_vencimento: '' },
+    ]);
   const setPag = (chave, k, v) => setPagamentos((l) => l.map((p) => (p.chave === chave ? { ...p, [k]: v } : p)));
 
   const receitaSel = useMemo(() => receitas.find((r) => String(r.id) === String(receitaId)), [receitas, receitaId]);
-  const pronto = itens.length > 0 && Math.abs(restante) < 0.01 && total >= 0 && pagamentos.length > 0;
+  const pronto = itens.length > 0 && Math.abs(restante) < 0.01 && total >= 0 && pagamentos.length > 0 && !acimaDoLimite;
 
   async function finalizar() {
     setErro('');
@@ -124,7 +160,12 @@ export default function PDV() {
         receita_id: receitaId || null,
         desconto: valorDesconto,
         observacoes: obs,
-        itens: itens.map(({ produto_id, descricao, quantidade, preco_unitario }) => ({ produto_id, descricao, quantidade, preco_unitario })),
+        itens: itens.map(({ produto_id, descricao, quantidade, preco_unitario }) => ({
+          produto_id,
+          descricao,
+          quantidade,
+          preco_unitario,
+        })),
         pagamentos: pagamentos.map(({ forma, valor, parcelas, primeiro_vencimento }) => ({ forma, valor, parcelas, primeiro_vencimento })),
         ordem_servico: gerarOS ? os : null,
       });
@@ -190,26 +231,51 @@ export default function PDV() {
                               {semEstoque && <span className="block text-xs text-red-600">Só {i.produto.estoque_atual} em estoque</span>}
                             </>
                           ) : (
-                            <input autoFocus placeholder="Ex.: Montagem, conserto…" value={i.descricao} onChange={(e) => setItem(i.chave, 'descricao', e.target.value)} className="campo py-1" />
+                            <input
+                              autoFocus
+                              placeholder="Ex.: Montagem, conserto…"
+                              value={i.descricao}
+                              onChange={(e) => setItem(i.chave, 'descricao', e.target.value)}
+                              className="campo py-1"
+                            />
                           )}
                         </td>
                         <td className="py-2">
                           <div className="flex items-center gap-1">
-                            <button onClick={() => setItem(i.chave, 'quantidade', Math.max(1, i.quantidade - 1))} className="rounded p-1 hover:bg-slate-100" aria-label="Menos">
+                            <button
+                              onClick={() => setItem(i.chave, 'quantidade', Math.max(1, i.quantidade - 1))}
+                              className="rounded p-1 hover:bg-slate-100"
+                              aria-label="Menos"
+                            >
                               <Minus size={14} />
                             </button>
                             <span className="w-6 text-center tabular-nums">{i.quantidade}</span>
-                            <button onClick={() => setItem(i.chave, 'quantidade', i.quantidade + 1)} className="rounded p-1 hover:bg-slate-100" aria-label="Mais">
+                            <button
+                              onClick={() => setItem(i.chave, 'quantidade', i.quantidade + 1)}
+                              className="rounded p-1 hover:bg-slate-100"
+                              aria-label="Mais"
+                            >
                               <Plus size={14} />
                             </button>
                           </div>
                         </td>
                         <td className="py-2">
-                          <input type="number" step="0.01" min="0" value={i.preco_unitario} onChange={(e) => setItem(i.chave, 'preco_unitario', e.target.value)} className="campo py-1 text-right" />
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={i.preco_unitario}
+                            onChange={(e) => setItem(i.chave, 'preco_unitario', e.target.value)}
+                            className="campo py-1 text-right"
+                          />
                         </td>
                         <td className="py-2 text-right tabular-nums">{moeda(i.quantidade * i.preco_unitario)}</td>
                         <td className="py-2 text-right">
-                          <button onClick={() => removerItem(i.chave)} className="p-1 text-slate-400 hover:text-red-600" aria-label="Remover">
+                          <button
+                            onClick={() => removerItem(i.chave)}
+                            className="p-1 text-slate-400 hover:text-red-600"
+                            aria-label="Remover"
+                          >
                             <Trash2 size={15} />
                           </button>
                         </td>
@@ -287,7 +353,12 @@ export default function PDV() {
                   </select>
                 </Campo>
                 <Campo label="Previsão de entrega">
-                  <input type="date" value={os.previsao_entrega} onChange={(e) => setOS({ ...os, previsao_entrega: e.target.value })} className="campo" />
+                  <input
+                    type="date"
+                    value={os.previsao_entrega}
+                    onChange={(e) => setOS({ ...os, previsao_entrega: e.target.value })}
+                    className="campo"
+                  />
                 </Campo>
                 <Campo label="Tipo de lente">
                   <select value={os.tipo_lente} onChange={(e) => setOS({ ...os, tipo_lente: e.target.value })} className="campo">
@@ -298,7 +369,12 @@ export default function PDV() {
                   </select>
                 </Campo>
                 <Campo label="Tratamentos">
-                  <input placeholder="Antirreflexo, filtro azul…" value={os.tratamentos} onChange={(e) => setOS({ ...os, tratamentos: e.target.value })} className="campo" />
+                  <input
+                    placeholder="Antirreflexo, filtro azul…"
+                    value={os.tratamentos}
+                    onChange={(e) => setOS({ ...os, tratamentos: e.target.value })}
+                    className="campo"
+                  />
                 </Campo>
               </div>
             ) : (
@@ -318,12 +394,26 @@ export default function PDV() {
               <div className="flex items-center justify-between gap-2">
                 <dt className="text-slate-500">Desconto</dt>
                 <dd className="flex items-center gap-1">
-                  <input type="number" min="0" step="0.01" value={desconto} onChange={(e) => setDesconto(e.target.value)} className="campo w-24 py-1 text-right" />
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={desconto}
+                    onChange={(e) => setDesconto(e.target.value)}
+                    className="campo w-24 py-1 text-right"
+                  />
                   <button onClick={() => setDescontoPct(!descontoPct)} className="w-9 rounded border border-slate-300 py-1 text-xs">
                     {descontoPct ? '%' : 'R$'}
                   </button>
                 </dd>
               </div>
+              {limiteDesconto < 100 && (
+                <p className={`text-right text-xs ${acimaDoLimite ? 'font-medium text-red-600' : 'text-slate-500'}`}>
+                  {pctDesconto > 0.05 ? `Desconto de ${pctDesconto.toFixed(1).replace('.', ',')}% · ` : ''}
+                  seu limite é {String(limiteDesconto).replace('.', ',')}%
+                  {acimaDoLimite && <span className="block">Peça a um gerente para finalizar esta venda.</span>}
+                </p>
+              )}
               <div className="flex justify-between border-t border-slate-100 pt-2 text-lg font-semibold">
                 <dt>Total</dt>
                 <dd className="tabular-nums">{moeda(total)}</dd>
@@ -335,14 +425,31 @@ export default function PDV() {
                 <div key={p.chave} className="rounded-lg border border-slate-200 p-3">
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-medium">{FORMAS_PAGAMENTO[p.forma]}</span>
-                    <button onClick={() => setPagamentos(pagamentos.filter((x) => x.chave !== p.chave))} className="text-slate-400 hover:text-red-600" aria-label="Remover">
+                    <button
+                      onClick={() => setPagamentos(pagamentos.filter((x) => x.chave !== p.chave))}
+                      className="text-slate-400 hover:text-red-600"
+                      aria-label="Remover"
+                    >
                       <X size={16} />
                     </button>
                   </div>
                   <div className="mt-2 grid grid-cols-2 gap-2">
-                    <input type="number" step="0.01" min="0" value={p.valor} onChange={(e) => setPag(p.chave, 'valor', e.target.value)} className="campo py-1 text-right" aria-label="Valor" />
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={p.valor}
+                      onChange={(e) => setPag(p.chave, 'valor', e.target.value)}
+                      className="campo py-1 text-right"
+                      aria-label="Valor"
+                    />
                     {(p.forma === 'credito' || p.forma === 'crediario') && (
-                      <select value={p.parcelas} onChange={(e) => setPag(p.chave, 'parcelas', Number(e.target.value))} className="campo py-1" aria-label="Parcelas">
+                      <select
+                        value={p.parcelas}
+                        onChange={(e) => setPag(p.chave, 'parcelas', Number(e.target.value))}
+                        className="campo py-1"
+                        aria-label="Parcelas"
+                      >
                         {Array.from({ length: p.forma === 'credito' ? 12 : 10 }, (_, n) => n + 1).map((n) => (
                           <option key={n} value={n}>
                             {n}x de {moeda(Number(p.valor || 0) / n)}
@@ -354,7 +461,12 @@ export default function PDV() {
                   {p.forma === 'crediario' && (
                     <label className="mt-2 flex items-center justify-between gap-2 text-xs text-slate-500">
                       1º vencimento
-                      <input type="date" value={p.primeiro_vencimento} onChange={(e) => setPag(p.chave, 'primeiro_vencimento', e.target.value)} className="campo w-auto py-1" />
+                      <input
+                        type="date"
+                        value={p.primeiro_vencimento}
+                        onChange={(e) => setPag(p.chave, 'primeiro_vencimento', e.target.value)}
+                        className="campo w-auto py-1"
+                      />
                     </label>
                   )}
                 </div>
@@ -376,7 +488,11 @@ export default function PDV() {
             </div>
 
             <p className={`mt-4 text-center text-sm ${Math.abs(restante) < 0.01 ? 'text-green-700' : 'text-amber-700'}`}>
-              {Math.abs(restante) < 0.01 ? 'Pagamento completo' : restante > 0 ? `Falta ${moeda(restante)}` : `Pagamento excede em ${moeda(-restante)}`}
+              {Math.abs(restante) < 0.01
+                ? 'Pagamento completo'
+                : restante > 0
+                  ? `Falta ${moeda(restante)}`
+                  : `Pagamento excede em ${moeda(-restante)}`}
             </p>
 
             <Campo label="Observação" className="mt-4">

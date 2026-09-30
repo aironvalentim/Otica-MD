@@ -19,49 +19,122 @@ import {
   Percent,
   Tag,
   FileSpreadsheet,
+  UserCog,
+  History,
+  KeyRound,
 } from 'lucide-react';
 import { useAuth } from '../../lib/auth';
-import { ToastProvider } from './ui';
+import { api } from '../../lib/api';
+import { Botao, Campo, Erro, Modal, ToastProvider, useToast } from './ui';
 
 const GRUPOS = [
   {
     titulo: null,
     itens: [
       { to: '/admin', label: 'Painel', icon: LayoutDashboard, end: true },
-      { to: '/admin/pdv', label: 'Nova venda', icon: ShoppingCart },
+      { to: '/admin/pdv', label: 'Nova venda', icon: ShoppingCart, p: ['vendas.criar'] },
     ],
   },
   {
     titulo: 'Vendas',
     itens: [
-      { to: '/admin/vendas', label: 'Vendas', icon: Receipt },
-      { to: '/admin/caixa', label: 'Caixa', icon: Wallet },
-      { to: '/admin/crediario', label: 'Crediário', icon: HandCoins },
+      { to: '/admin/vendas', label: 'Vendas', icon: Receipt, p: ['vendas.ver'] },
+      { to: '/admin/caixa', label: 'Caixa', icon: Wallet, p: ['caixa.operar', 'relatorios.financeiro'] },
+      { to: '/admin/crediario', label: 'Crediário', icon: HandCoins, p: ['crediario.receber', 'relatorios.financeiro'] },
     ],
   },
   {
     titulo: 'Atendimento',
     itens: [
-      { to: '/admin/clientes', label: 'Clientes e receitas', icon: Users },
-      { to: '/admin/os', label: 'Ordens de serviço', icon: Wrench },
-      { to: '/admin/agendamentos', label: 'Agendamentos', icon: CalendarDays },
+      { to: '/admin/clientes', label: 'Clientes e receitas', icon: Users, p: ['clientes.gerenciar', 'vendas.criar'] },
+      { to: '/admin/os', label: 'Ordens de serviço', icon: Wrench, p: ['os.gerenciar'] },
+      { to: '/admin/agendamentos', label: 'Agendamentos', icon: CalendarDays, p: ['agendamentos.gerenciar'] },
     ],
   },
   {
     titulo: 'Estoque',
     itens: [
       { to: '/admin/produtos', label: 'Produtos', icon: Package, end: true },
-      { to: '/admin/estoque', label: 'Entradas e saídas', icon: ArrowLeftRight },
-      { to: '/admin/produtos/importar', label: 'Importar planilha', icon: FileSpreadsheet, admin: true },
-      { to: '/admin/precos', label: 'Preços em massa', icon: Percent, admin: true },
-      { to: '/admin/etiquetas', label: 'Etiquetas', icon: Tag },
+      { to: '/admin/estoque', label: 'Entradas e saídas', icon: ArrowLeftRight, p: ['estoque.movimentar'] },
+      { to: '/admin/produtos/importar', label: 'Importar planilha', icon: FileSpreadsheet, p: ['produtos.importar'] },
+      { to: '/admin/precos', label: 'Preços em massa', icon: Percent, p: ['precos.massa'] },
+      { to: '/admin/etiquetas', label: 'Etiquetas', icon: Tag, p: ['etiquetas.imprimir'] },
+    ],
+  },
+  {
+    titulo: 'Gestão',
+    itens: [
+      { to: '/admin/equipe', label: 'Equipe e perfis', icon: UserCog, p: ['usuarios.gerenciar'] },
+      { to: '/admin/auditoria', label: 'Auditoria', icon: History, p: ['auditoria.ver'] },
+      { to: '/admin/configuracoes', label: 'Configurações', icon: Settings, p: ['config.loja'] },
     ],
   },
 ];
 
+function MinhaSenha({ aberto, onFechar }) {
+  const avisar = useToast();
+  const [f, setF] = useState({ atual: '', nova: '', repetir: '' });
+  const [erro, setErro] = useState('');
+  const [salvando, setSalvando] = useState(false);
+  async function salvar(e) {
+    e.preventDefault();
+    setErro('');
+    if (f.nova !== f.repetir) return setErro('A confirmação não confere com a nova senha');
+    setSalvando(true);
+    try {
+      await api.post('/auth/senha', { atual: f.atual, nova: f.nova });
+      setF({ atual: '', nova: '', repetir: '' });
+      onFechar();
+      avisar('Senha alterada');
+    } catch (err) {
+      setErro(err.message);
+    } finally {
+      setSalvando(false);
+    }
+  }
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  return (
+    <Modal aberto={aberto} onFechar={onFechar} titulo="Minha senha" largura="max-w-sm">
+      <form onSubmit={salvar} className="space-y-4">
+        <Campo label="Senha atual">
+          <input type="password" required autoComplete="current-password" value={f.atual} onChange={set('atual')} className="campo" />
+        </Campo>
+        <Campo label="Nova senha" dica="Mínimo 8 caracteres">
+          <input
+            type="password"
+            required
+            minLength={8}
+            autoComplete="new-password"
+            value={f.nova}
+            onChange={set('nova')}
+            className="campo"
+          />
+        </Campo>
+        <Campo label="Repita a nova senha">
+          <input
+            type="password"
+            required
+            minLength={8}
+            autoComplete="new-password"
+            value={f.repetir}
+            onChange={set('repetir')}
+            className="campo"
+          />
+        </Campo>
+        <Erro>{erro}</Erro>
+        <Botao type="submit" carregando={salvando} className="w-full">
+          Alterar senha
+        </Botao>
+      </form>
+    </Modal>
+  );
+}
+
 export default function AdminLayout() {
-  const { usuario, logout } = useAuth();
+  const { usuario, logout, pode } = useAuth();
   const [menu, setMenu] = useState(false);
+  const [senha, setSenha] = useState(false);
+  const grupos = GRUPOS.map((g) => ({ ...g, itens: g.itens.filter((i) => !i.p || pode(...i.p)) })).filter((g) => g.itens.length);
 
   const nav = (
     <nav className="flex h-full flex-col">
@@ -72,10 +145,10 @@ export default function AdminLayout() {
         <span className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-white/60">gestão</span>
       </Link>
       <div className="flex-1 space-y-5 overflow-y-auto px-3 pb-4">
-        {GRUPOS.map((g, i) => (
+        {grupos.map((g, i) => (
           <div key={i}>
             {g.titulo && <p className="mb-1 px-3 text-[11px] font-medium uppercase tracking-wider text-white/40">{g.titulo}</p>}
-            {g.itens.filter((i) => !i.admin || usuario?.papel === 'admin').map(({ to, label, icon: Icon, end }) => (
+            {g.itens.map(({ to, label, icon: Icon, end }) => (
               <NavLink
                 key={to}
                 to={to}
@@ -94,16 +167,32 @@ export default function AdminLayout() {
         ))}
       </div>
       <div className="space-y-1 border-t border-white/10 p-3">
-        {usuario?.papel === 'admin' && (
-          <NavLink to="/admin/configuracoes" onClick={() => setMenu(false)} className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-white/70 hover:bg-white/5 hover:text-white">
-            <Settings size={17} /> Configurações
-          </NavLink>
-        )}
-        <a href="/" target="_blank" rel="noreferrer" className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-white/70 hover:bg-white/5 hover:text-white">
+        <div className="px-3 pb-2 pt-1">
+          <p className="truncate text-sm font-medium text-white">{usuario?.nome}</p>
+          <p className="truncate text-xs text-white/50">{usuario?.perfil?.nome}</p>
+        </div>
+        <button
+          onClick={() => {
+            setMenu(false);
+            setSenha(true);
+          }}
+          className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-white/70 hover:bg-white/5 hover:text-white"
+        >
+          <KeyRound size={17} /> Minha senha
+        </button>
+        <a
+          href="/"
+          target="_blank"
+          rel="noreferrer"
+          className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-white/70 hover:bg-white/5 hover:text-white"
+        >
           <ExternalLink size={17} /> Ver site
         </a>
-        <button onClick={logout} className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-white/70 hover:bg-white/5 hover:text-white">
-          <LogOut size={17} /> Sair ({usuario?.nome?.split(' ')[0]})
+        <button
+          onClick={logout}
+          className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-white/70 hover:bg-white/5 hover:text-white"
+        >
+          <LogOut size={17} /> Sair
         </button>
       </div>
     </nav>
@@ -133,6 +222,8 @@ export default function AdminLayout() {
             </aside>
           </div>
         )}
+
+        <MinhaSenha aberto={senha} onFechar={() => setSenha(false)} />
 
         <main className="px-4 py-6 lg:ml-60 lg:px-8 lg:py-8">
           <div className="mx-auto max-w-6xl">

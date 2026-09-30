@@ -33,7 +33,25 @@ export function AuthProvider({ children }) {
     setUsuario(null);
   }, []);
 
-  return <AuthContext.Provider value={{ usuario, carregando, login, logout }}>{children}</AuthContext.Provider>;
+  // pode('custos.ver') ou pode('a', 'b') = tem pelo menos uma das permissões
+  const pode = useCallback(
+    (...chaves) => {
+      const lista = usuario?.permissoes || [];
+      return lista.includes('*') || chaves.some((c) => lista.includes(c));
+    },
+    [usuario],
+  );
+
+  const recarregar = useCallback(
+    () =>
+      api
+        .get('/auth/me')
+        .then(setUsuario)
+        .catch(() => {}),
+    [],
+  );
+
+  return <AuthContext.Provider value={{ usuario, carregando, login, logout, pode, recarregar }}>{children}</AuthContext.Provider>;
 }
 
 export const useAuth = () => useContext(AuthContext);

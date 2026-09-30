@@ -2,9 +2,12 @@ const router = require('express').Router();
 const { query, transaction } = require('../db');
 const { ah, parse, z, zId, zMoney, HttpError } = require('../util');
 const { exigirCaixaAberto, lancar } = require('./caixa');
+const { exigir } = require('../auth');
+const { registrar } = require('../auditoria');
 
 router.get(
   '/parcelas',
+  exigir('crediario.receber', 'relatorios.financeiro'),
   ah(async (req, res) => {
     const { status = 'aberta', cliente_id, situacao } = req.query;
     const where = [];
@@ -33,6 +36,7 @@ router.get(
 
 router.get(
   '/resumo',
+  exigir('relatorios.financeiro'),
   ah(async (_req, res) => {
     const { rows } = await query(
       `select
@@ -49,6 +53,7 @@ router.get(
 
 router.post(
   '/parcelas/:id/pagar',
+  exigir('crediario.receber'),
   ah(async (req, res) => {
     const id = parse(zId, req.params.id);
     const d = parse(
@@ -77,6 +82,11 @@ router.post(
         venda_id: p.venda_id,
         parcela_id: p.id,
         usuario_id: req.usuario.id,
+      });
+      await registrar(client, req, 'parcela_recebida', {
+        entidade: 'venda',
+        entidadeId: p.venda_id,
+        detalhes: { parcela: `${p.numero}/${p.total_parcelas}`, valor, forma: d.forma_pagamento },
       });
       return upd[0];
     });

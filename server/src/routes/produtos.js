@@ -3,7 +3,8 @@ const multer = require('multer');
 const { query, transaction } = require('../db');
 const { ah, parse, z, zId, zIdOpt, zMoney, zTextOpt, slugify, buildUpdate, vazio, round2, HttpError } = require('../util');
 const { registrarMovimentacao } = require('./estoque');
-const { somenteAdmin } = require('../auth');
+const { exigir } = require('../auth');
+const { registrar } = require('../auditoria');
 const { carregarRegras, precoSugerido, arredondar, registrarPreco } = require('../precificacao');
 const { gerarModelo, lerPlanilha, normalizar } = require('../importacao');
 
@@ -165,6 +166,7 @@ router.get(
 // ---------------------------------------------------------------------
 router.get(
   '/importacao/modelo',
+  exigir('produtos.importar'),
   ah(async (_req, res) => {
     const buf = await gerarModelo();
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -182,7 +184,7 @@ const uploadPlanilha = multer({
 
 router.post(
   '/importacao',
-  somenteAdmin,
+  exigir('produtos.importar'),
   uploadPlanilha.single('arquivo'),
   ah(async (req, res) => {
     if (!req.file) throw new HttpError(400, 'Selecione a planilha');
@@ -293,6 +295,7 @@ router.post(
           await registrarPreco(client, antes, depois, 'Importação por planilha', req.usuario.id);
         }
       }
+      await registrar(client, req, 'importacao_planilha', { detalhes: { arquivo: req.file.originalname, ...total } });
     });
     res.json({ simulacao: false, total, linhas: saida });
   })
@@ -319,7 +322,7 @@ const schemaReajuste = z.object({
 
 router.post(
   '/reajuste',
-  somenteAdmin,
+  exigir('precos.massa'),
   ah(async (req, res) => {
     const d = parse(schemaReajuste, req.body);
     if (d.acao !== 'remover_promocao' && d.acao !== 'aplicar_markup' && !d.valor) throw new HttpError(400, 'Informe o percentual');
@@ -384,6 +387,7 @@ router.post(
           );
           await registrarPreco(client, antes, rows[0], motivos[d.acao], req.usuario.id);
         }
+        await registrar(client, req, 'reajuste_precos', { detalhes: { acao: d.acao, motivo: motivos[d.acao], valor: d.valor ?? null, total: itens.length } });
       });
     }
     res.json({ simulacao: d.simular, total: itens.length, abaixo_do_custo: itens.filter((i) => i.margem_depois != null && i.margem_depois < 0).length, itens });
@@ -421,23 +425,35 @@ router.get(
 
 router.post(
   '/',
+  exigir('produtos.editar'),
   ah(async (req, res) => {
     const d = parse(schema.extend({ estoque_inicial: z.coerce.number().int().min(0).default(0) }), req.body);
+    if (!req.pode('custos.ver')) delete d.preco_custo;
     if (d.preco_venda == null) {
       const regras = await carregarRegras({ query });
       d.preco_venda = precoSugerido(d.preco_custo, d.categoria, regras);
       if (d.preco_venda == null) throw new HttpError(400, 'Informe o preço de venda ou o custo');
     }
-    const produto = await transaction((client) => criarProduto(client, d, req.usuario.id, { quantidade: d.estoque_inicial }));
+    const produto = await transaction(async (client) => {
+      const p = await criarProduto(client, d, req.usuario.id, { quantidade: d.estoque_inicial });
+      await registrar(client, req, 'produto_criado', {
+        entidade: 'produto',
+        entidadeId: p.id,
+        detalhes: { nome: p.nome, sku: p.sku, preco_venda: p.preco_venda, estoque_inicial: d.estoque_inicial },
+      });
+      return p;
+    });
     res.status(201).json(produto);
   })
 );
 
 router.put(
   '/:id',
+  exigir('produtos.editar'),
   ah(async (req, res) => {
     const id = parse(zId, req.params.id);
     const d = parse(schema.partial(), req.body);
+    if (!req.pode('custos.ver')) delete d.preco_custo;
     if ('preco_venda' in d && d.preco_venda == null) throw new HttpError(400, 'Informe o preço de venda');
     if ('preco_custo' in d && d.preco_custo == null) d.preco_custo = 0;
     const produto = await transaction(async (client) => {
@@ -456,6 +472,13 @@ router.put(
       );
       const depois = await garantirSku(client, rows[0]);
       await registrarPreco(client, antes, depois, 'Edição no cadastro', req.usuario.id);
+      const mudou = {};
+      for (const c of Object.keys(d)) {
+        if (String(antes[c] ?? '') !== String(depois[c] ?? '')) mudou[c] = { de: antes[c], para: depois[c] };
+      }
+      if (Object.keys(mudou).length) {
+        await registrar(client, req, 'produto_alterado', { entidade: 'produto', entidadeId: id, detalhes: { nome: depois.nome, ...mudou } });
+      }
       return depois;
     });
     res.json(produto);
@@ -465,10 +488,12 @@ router.put(
 // Não apaga de fato (o produto pode estar em vendas antigas): apenas desativa e tira do site
 router.delete(
   '/:id',
+  exigir('produtos.editar'),
   ah(async (req, res) => {
     const id = parse(zId, req.params.id);
-    const { rowCount } = await query('update produtos set ativo = false, publicado = false, atualizado_em = now() where id = $1', [id]);
-    if (!rowCount) throw new HttpError(404, 'Produto não encontrado');
+    const { rows } = await query('update produtos set ativo = false, publicado = false, atualizado_em = now() where id = $1 returning nome, sku', [id]);
+    if (!rows[0]) throw new HttpError(404, 'Produto não encontrado');
+    await registrar({ query }, req, 'produto_desativado', { entidade: 'produto', entidadeId: id, detalhes: rows[0] });
     res.status(204).end();
   })
 );

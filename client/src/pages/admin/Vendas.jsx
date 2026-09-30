@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { ShoppingCart } from 'lucide-react';
 import { useApi } from '../../lib/hooks';
+import { useAuth } from '../../lib/auth';
 import { qs } from '../../lib/api';
 import { dataHora, hojeISO, moeda } from '../../lib/format';
 import { Botao, Cabecalho, Cartao, Etiqueta, Indicador, Tabela } from '../../components/admin/ui';
@@ -10,6 +11,7 @@ const inicioMes = () => hojeISO().slice(0, 8) + '01';
 
 export default function Vendas() {
   const navigate = useNavigate();
+  const { pode } = useAuth();
   const [f, setF] = useState({ de: inicioMes(), ate: hojeISO(), status: '' });
   const { dados } = useApi(`/vendas${qs(f)}`);
   const concluidas = dados?.filter((v) => v.status === 'concluida') || [];
@@ -18,18 +20,22 @@ export default function Vendas() {
   return (
     <>
       <Cabecalho titulo="Vendas">
-        <Link to="/admin/pdv">
-          <Botao>
-            <ShoppingCart size={16} /> Nova venda
-          </Botao>
-        </Link>
+        {pode('vendas.criar') && (
+          <Link to="/admin/pdv">
+            <Botao>
+              <ShoppingCart size={16} /> Nova venda
+            </Botao>
+          </Link>
+        )}
       </Cabecalho>
 
-      <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-3">
-        <Indicador titulo="Total no período" valor={moeda(total)} />
-        <Indicador titulo="Vendas" valor={concluidas.length} />
-        <Indicador titulo="Ticket médio" valor={moeda(concluidas.length ? total / concluidas.length : 0)} />
-      </div>
+      {pode('relatorios.financeiro') && (
+        <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-3">
+          <Indicador titulo="Total no período" valor={moeda(total)} />
+          <Indicador titulo="Vendas" valor={concluidas.length} />
+          <Indicador titulo="Ticket médio" valor={moeda(concluidas.length ? total / concluidas.length : 0)} />
+        </div>
+      )}
 
       <Cartao semPadding>
         <div className="flex flex-wrap gap-3 border-b border-slate-100 p-4 text-sm text-slate-600">

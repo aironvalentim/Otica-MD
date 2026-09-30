@@ -3,6 +3,8 @@ const { query, transaction } = require('../db');
 const { ah, parse, z, zId, zIdOpt, zMoney, zTextOpt, zDateOpt, round2, hoje, HttpError } = require('../util');
 const { registrarMovimentacao } = require('./estoque');
 const { exigirCaixaAberto, lancar } = require('./caixa');
+const { exigir } = require('../auth');
+const { registrar } = require('../auditoria');
 
 const FORMAS = ['dinheiro', 'pix', 'debito', 'credito', 'crediario'];
 
@@ -54,6 +56,7 @@ const schemaVenda = z.object({
 
 router.post(
   '/',
+  exigir('vendas.criar'),
   ah(async (req, res) => {
     const d = parse(schemaVenda, req.body);
     const usa = (f) => d.pagamentos.some((p) => p.forma === f);
@@ -66,21 +69,41 @@ router.post(
 
       // Monta itens a partir do cadastro (preço informado pode ter sido ajustado no PDV)
       const itens = [];
+      let valorTabela = 0; // soma pelo preço de etiqueta (base do limite de desconto)
+      let descontoNosItens = 0; // preço reduzido item a item no PDV
       for (const item of d.itens) {
         let descricao = item.descricao;
         let custo = 0;
+        let precoTabela = item.preco_unitario;
         if (item.produto_id) {
-          const { rows } = await client.query('select nome, cor, preco_custo, ativo from produtos where id = $1', [item.produto_id]);
+          const { rows } = await client.query(
+            'select nome, cor, preco_custo, preco_venda, preco_promocional, ativo from produtos where id = $1',
+            [item.produto_id]
+          );
           if (!rows[0]) throw new HttpError(404, `Produto ${item.produto_id} não encontrado`);
           descricao = descricao || [rows[0].nome, rows[0].cor].filter(Boolean).join(' - ');
           custo = rows[0].preco_custo;
+          precoTabela = rows[0].preco_promocional > 0 ? rows[0].preco_promocional : rows[0].preco_venda;
         }
         if (!descricao) throw new HttpError(400, 'Item avulso precisa de descrição');
+        valorTabela += item.quantidade * precoTabela;
+        descontoNosItens += Math.max(0, precoTabela - item.preco_unitario) * item.quantidade;
         itens.push({ ...item, descricao, custo, total: round2(item.quantidade * item.preco_unitario) });
       }
 
       const subtotal = round2(itens.reduce((s, i) => s + i.total, 0));
       if (d.desconto > subtotal) throw new HttpError(400, 'Desconto maior que o valor da venda');
+
+      // Limite de desconto do perfil (desconto no total + preço reduzido nos itens)
+      const descontoTotal = round2(d.desconto + descontoNosItens);
+      const pctDesconto = valorTabela > 0 ? (descontoTotal / valorTabela) * 100 : 0;
+      const limite = Number(req.usuario.desconto_max_pct);
+      if (pctDesconto > limite + 0.001) {
+        throw new HttpError(
+          403,
+          `Desconto de ${pctDesconto.toFixed(1).replace('.', ',')}% acima do seu limite de ${String(limite).replace('.', ',')}%. Peça a um gerente para finalizar esta venda`
+        );
+      }
       const total = round2(subtotal - d.desconto);
       const pago = round2(d.pagamentos.reduce((s, p) => s + p.valor, 0));
       if (Math.abs(pago - total) > 0.009) {
@@ -169,6 +192,16 @@ router.post(
         ]);
         v.os_id = osRows[0].id;
       }
+      await registrar(client, req, 'venda_criada', {
+        entidade: 'venda',
+        entidadeId: v.id,
+        detalhes: {
+          total,
+          desconto: descontoTotal,
+          desconto_pct: Math.round(pctDesconto * 10) / 10,
+          formas: d.pagamentos.map((p) => p.forma),
+        },
+      });
       return v;
     });
 
@@ -178,6 +211,7 @@ router.post(
 
 router.get(
   '/',
+  exigir('vendas.ver'),
   ah(async (req, res) => {
     const { de, ate, cliente_id, status } = req.query;
     const where = [];
@@ -214,6 +248,7 @@ router.get(
 
 router.get(
   '/:id',
+  exigir('vendas.ver', 'vendas.criar'),
   ah(async (req, res) => {
     const id = parse(zId, req.params.id);
     const { rows } = await query(
@@ -236,6 +271,7 @@ router.get(
 // Cancela a venda: devolve estoque, estorna no caixa aberto e cancela parcelas/OS
 router.post(
   '/:id/cancelar',
+  exigir('vendas.cancelar'),
   ah(async (req, res) => {
     const id = parse(zId, req.params.id);
     const { motivo } = parse(z.object({ motivo: z.string().trim().min(3, 'Informe o motivo do cancelamento') }), req.body);
@@ -292,6 +328,7 @@ router.post(
           where id = $1`,
         [id, motivo]
       );
+      await registrar(client, req, 'venda_cancelada', { entidade: 'venda', entidadeId: id, detalhes: { total: v.total, motivo } });
     });
     res.json({ ok: true });
   })

@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Plus, Pencil } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Plus } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useApi } from '../../lib/hooks';
 import { telefone, CATEGORIAS, moeda } from '../../lib/format';
 import { ARREDONDAMENTOS, arredondar } from '../../lib/precos';
-import { Botao, Cabecalho, Campo, Cartao, Erro, Etiqueta, Modal, Tabela, useToast } from '../../components/admin/ui';
+import { Botao, Cabecalho, Campo, Cartao, Erro, Modal, Tabela, useToast } from '../../components/admin/ui';
 
 const CAMPOS_LOJA = [
   ['loja_nome', 'Nome da loja'],
@@ -107,7 +108,11 @@ function Precificacao() {
           })}
         </div>
         <Campo label="Arredondamento do preço" className="max-w-sm">
-          <select value={f.preco_arredondamento || 'x90'} onChange={(e) => setF({ ...f, preco_arredondamento: e.target.value })} className="campo">
+          <select
+            value={f.preco_arredondamento || 'x90'}
+            onChange={(e) => setF({ ...f, preco_arredondamento: e.target.value })}
+            className="campo"
+          >
             {Object.entries(ARREDONDAMENTOS).map(([k, l]) => (
               <option key={k} value={k}>
                 {l}
@@ -129,100 +134,6 @@ function Precificacao() {
   );
 }
 
-function FormUsuario({ inicial, onSalvo }) {
-  const [f, setF] = useState({ nome: inicial?.nome || '', email: inicial?.email || '', papel: inicial?.papel || 'vendedor', senha: '', ativo: inicial?.ativo ?? true });
-  const [erro, setErro] = useState('');
-  async function salvar(e) {
-    e.preventDefault();
-    setErro('');
-    const corpo = { ...f };
-    if (!corpo.senha) delete corpo.senha;
-    try {
-      if (inicial) await api.put(`/usuarios/${inicial.id}`, corpo);
-      else await api.post('/usuarios', corpo);
-      onSalvo();
-    } catch (err) {
-      setErro(err.message);
-    }
-  }
-  return (
-    <form onSubmit={salvar} className="space-y-4">
-      <Campo label="Nome">
-        <input required value={f.nome} onChange={(e) => setF({ ...f, nome: e.target.value })} className="campo" />
-      </Campo>
-      <Campo label="E-mail">
-        <input required type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} className="campo" />
-      </Campo>
-      <Campo label="Perfil" dica="Vendedor não acessa configurações nem cadastro de usuários">
-        <select value={f.papel} onChange={(e) => setF({ ...f, papel: e.target.value })} className="campo">
-          <option value="vendedor">Vendedor</option>
-          <option value="admin">Administrador</option>
-        </select>
-      </Campo>
-      <Campo label={inicial ? 'Nova senha (deixe vazio para manter)' : 'Senha (mínimo 8 caracteres)'}>
-        <input type="password" required={!inicial} minLength={8} value={f.senha} onChange={(e) => setF({ ...f, senha: e.target.value })} className="campo" />
-      </Campo>
-      {inicial && (
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={f.ativo} onChange={(e) => setF({ ...f, ativo: e.target.checked })} /> Ativo
-        </label>
-      )}
-      <Erro>{erro}</Erro>
-      <Botao type="submit" className="w-full">
-        Salvar
-      </Botao>
-    </form>
-  );
-}
-
-function Usuarios() {
-  const avisar = useToast();
-  const { dados, recarregar } = useApi('/usuarios');
-  const [editar, setEditar] = useState(null);
-  return (
-    <Cartao
-      titulo="Equipe"
-      semPadding
-      acoes={
-        <Botao tamanho="sm" variante="secundario" onClick={() => setEditar({})}>
-          <Plus size={14} /> Usuário
-        </Botao>
-      }
-    >
-      <Tabela
-        linhas={dados}
-        colunas={[
-          { titulo: 'Nome', campo: 'nome' },
-          { titulo: 'E-mail', campo: 'email' },
-          { titulo: 'Perfil', render: (u) => <Etiqueta cor={u.papel === 'admin' ? 'gold' : 'slate'}>{u.papel === 'admin' ? 'Administrador' : 'Vendedor'}</Etiqueta> },
-          { titulo: 'Situação', render: (u) => (u.ativo ? 'Ativo' : <span className="text-slate-400">Inativo</span>) },
-          {
-            titulo: '',
-            direita: true,
-            render: (u) => (
-              <button onClick={() => setEditar(u)} className="text-slate-500 hover:text-ink" aria-label="Editar">
-                <Pencil size={15} />
-              </button>
-            ),
-          },
-        ]}
-      />
-      <Modal aberto={!!editar} onFechar={() => setEditar(null)} titulo={editar?.id ? 'Editar usuário' : 'Novo usuário'}>
-        {editar && (
-          <FormUsuario
-            inicial={editar.id ? editar : null}
-            onSalvo={() => {
-              setEditar(null);
-              avisar('Usuário salvo');
-              recarregar();
-            }}
-          />
-        )}
-      </Modal>
-    </Cartao>
-  );
-}
-
 function Fornecedores() {
   const avisar = useToast();
   const { dados, recarregar } = useApi('/fornecedores');
@@ -232,7 +143,14 @@ function Fornecedores() {
 
   const abrir = (x) => {
     setErro('');
-    setF({ nome: x.nome || '', tipo: x.tipo || 'fornecedor', cnpj: x.cnpj || '', telefone: x.telefone || '', email: x.email || '', observacoes: x.observacoes || '' });
+    setF({
+      nome: x.nome || '',
+      tipo: x.tipo || 'fornecedor',
+      cnpj: x.cnpj || '',
+      telefone: x.telefone || '',
+      email: x.email || '',
+      observacoes: x.observacoes || '',
+    });
     setEditar(x);
   };
 
@@ -313,7 +231,13 @@ export default function Configuracoes() {
         <DadosLoja />
         <Precificacao />
         <Fornecedores />
-        <Usuarios />
+        <p className="text-sm text-slate-500">
+          Usuários, senhas e perfis de acesso ficam em{' '}
+          <Link to="/admin/equipe" className="font-medium text-ink underline">
+            Equipe e perfis
+          </Link>
+          .
+        </p>
       </div>
     </>
   );

@@ -1,6 +1,9 @@
 const router = require('express').Router();
 const { query } = require('../db');
 const { ah, parse, z, zId, zIdOpt, HttpError } = require('../util');
+const { exigir } = require('../auth');
+
+router.use(exigir('agendamentos.gerenciar'));
 
 router.get(
   '/',

@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Eye, Check, AlertTriangle } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useApi } from '../../lib/hooks';
+import { useAuth } from '../../lib/auth';
 import { CATEGORIAS, moeda } from '../../lib/format';
 import { ARREDONDAMENTOS } from '../../lib/precos';
 import { Botao, Cabecalho, Campo, Cartao, Erro, Tabela, useToast } from '../../components/admin/ui';
@@ -17,6 +18,7 @@ const ACOES = {
 
 export default function Precos() {
   const avisar = useToast();
+  const podeCusto = useAuth().pode('custos.ver');
   const [params] = useSearchParams();
   const ids = params.get('ids') ? params.get('ids').split(',').map(Number) : null;
   const { dados: marcas } = useApi('/produtos/marcas');
@@ -102,7 +104,11 @@ export default function Precos() {
                 </select>
               </Campo>
               <Campo label="Fornecedor">
-                <select value={filtro.fornecedor_id} onChange={(e) => setFiltro({ ...filtro, fornecedor_id: e.target.value })} className="campo">
+                <select
+                  value={filtro.fornecedor_id}
+                  onChange={(e) => setFiltro({ ...filtro, fornecedor_id: e.target.value })}
+                  className="campo"
+                >
                   <option value="">Todos</option>
                   {fornecedores?.map((f) => (
                     <option key={f.id} value={f.id}>
@@ -112,7 +118,11 @@ export default function Precos() {
                 </select>
               </Campo>
               <label className="flex items-center gap-2 self-end pb-2 text-sm">
-                <input type="checkbox" checked={filtro.somente_publicados} onChange={(e) => setFiltro({ ...filtro, somente_publicados: e.target.checked })} />
+                <input
+                  type="checkbox"
+                  checked={filtro.somente_publicados}
+                  onChange={(e) => setFiltro({ ...filtro, somente_publicados: e.target.checked })}
+                />
                 Só os que estão no site
               </label>
             </div>
@@ -132,12 +142,28 @@ export default function Precos() {
             </Campo>
             {pede === 'pct' && (
               <Campo label="Percentual (%)">
-                <input type="number" min="0.1" step="0.1" value={valor} onChange={(e) => setValor(e.target.value)} className="campo" placeholder="Ex.: 10" />
+                <input
+                  type="number"
+                  min="0.1"
+                  step="0.1"
+                  value={valor}
+                  onChange={(e) => setValor(e.target.value)}
+                  className="campo"
+                  placeholder="Ex.: 10"
+                />
               </Campo>
             )}
             {pede === 'markup' && (
               <Campo label="Markup (× custo)" dica="Vazio = markup de cada categoria">
-                <input type="number" min="1" step="0.05" value={valor} onChange={(e) => setValor(e.target.value)} className="campo" placeholder="Ex.: 2,5" />
+                <input
+                  type="number"
+                  min="1"
+                  step="0.05"
+                  value={valor}
+                  onChange={(e) => setValor(e.target.value)}
+                  className="campo"
+                  placeholder="Ex.: 2,5"
+                />
               </Campo>
             )}
             {acao !== 'remover_promocao' && (
@@ -155,7 +181,13 @@ export default function Precos() {
           <div className="mt-4">
             <Erro>{erro}</Erro>
           </div>
-          <Botao className="mt-3 w-full" variante="secundario" carregando={carregando && !previa} onClick={() => executar(true)} disabled={pede === 'pct' && !valor}>
+          <Botao
+            className="mt-3 w-full"
+            variante="secundario"
+            carregando={carregando && !previa}
+            onClick={() => executar(true)}
+            disabled={pede === 'pct' && !valor}
+          >
             <Eye size={16} /> Ver prévia
           </Botao>
         </Cartao>
@@ -190,7 +222,7 @@ export default function Precos() {
                   </>
                 ),
               },
-              { titulo: 'Custo', direita: true, render: (i) => moeda(i.custo) },
+              podeCusto && { titulo: 'Custo', direita: true, render: (i) => moeda(i.custo) },
               {
                 titulo: 'Venda',
                 direita: true,
@@ -208,20 +240,35 @@ export default function Precos() {
                 direita: true,
                 render: (i) =>
                   i.promo_antes === i.promo_depois ? (
-                    i.promo_depois ? moeda(i.promo_depois) : '—'
+                    i.promo_depois ? (
+                      moeda(i.promo_depois)
+                    ) : (
+                      '—'
+                    )
                   ) : (
                     <span>
-                      <s className="text-slate-400">{i.promo_antes ? moeda(i.promo_antes) : '—'}</s> <strong>{i.promo_depois ? moeda(i.promo_depois) : '—'}</strong>
+                      <s className="text-slate-400">{i.promo_antes ? moeda(i.promo_antes) : '—'}</s>{' '}
+                      <strong>{i.promo_depois ? moeda(i.promo_depois) : '—'}</strong>
                     </span>
                   ),
               },
-              {
+              podeCusto && {
                 titulo: 'Margem',
                 direita: true,
                 render: (i) =>
-                  i.margem_depois == null ? '—' : <span className={i.margem_depois < 0 ? "font-semibold text-red-600" : i.margem_depois < 30 ? "text-amber-700" : "text-green-700"}>{Math.round(i.margem_depois)}%</span>,
+                  i.margem_depois == null ? (
+                    '—'
+                  ) : (
+                    <span
+                      className={
+                        i.margem_depois < 0 ? 'font-semibold text-red-600' : i.margem_depois < 30 ? 'text-amber-700' : 'text-green-700'
+                      }
+                    >
+                      {Math.round(i.margem_depois)}%
+                    </span>
+                  ),
               },
-            ]}
+            ].filter(Boolean)}
           />
         </Cartao>
       )}

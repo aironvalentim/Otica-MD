@@ -1,6 +1,8 @@
 const router = require('express').Router();
 const { query, transaction } = require('../db');
 const { ah, parse, z, zId, zMoney, zTextOpt, round2, HttpError } = require('../util');
+const { exigir } = require('../auth');
+const { registrar } = require('../auditoria');
 
 // Retorna o caixa aberto (travado para a transação) ou lança erro
 async function exigirCaixaAberto(client) {
@@ -39,6 +41,7 @@ async function resumoCaixa(db, caixa) {
 
 router.get(
   '/atual',
+  exigir('caixa.operar', 'vendas.criar', 'relatorios.financeiro'),
   ah(async (_req, res) => {
     const { rows } = await query(
       `select c.*, u.nome as aberto_por_nome from caixas c left join usuarios u on u.id = c.aberto_por where c.fechado_em is null`
@@ -50,6 +53,7 @@ router.get(
 
 router.get(
   '/',
+  exigir('relatorios.financeiro'),
   ah(async (_req, res) => {
     const { rows } = await query(
       `select c.*, a.nome as aberto_por_nome, f.nome as fechado_por_nome,
@@ -65,6 +69,7 @@ router.get(
 
 router.get(
   '/:id',
+  exigir('relatorios.financeiro'),
   ah(async (req, res) => {
     const id = parse(zId, req.params.id);
     const { rows } = await query('select * from caixas where id = $1', [id]);
@@ -75,6 +80,7 @@ router.get(
 
 router.post(
   '/abrir',
+  exigir('caixa.operar'),
   ah(async (req, res) => {
     const d = parse(z.object({ valor_abertura: zMoney.default(0), observacoes: zTextOpt }), req.body);
     const { rows: aberto } = await query('select id from caixas where fechado_em is null');
@@ -84,6 +90,7 @@ router.post(
       d.valor_abertura,
       d.observacoes ?? null,
     ]);
+    await registrar({ query }, req, 'caixa_aberto', { entidade: 'caixa', entidadeId: rows[0].id, detalhes: { valor_abertura: d.valor_abertura } });
     res.status(201).json(rows[0]);
   })
 );
@@ -91,6 +98,7 @@ router.post(
 // Suprimento (entrada de troco) e sangria (retirada de dinheiro)
 router.post(
   '/lancamentos',
+  exigir('caixa.operar'),
   ah(async (req, res) => {
     const d = parse(
       z.object({ tipo: z.enum(['suprimento', 'sangria']), valor: zMoney.refine((v) => v > 0, 'Valor deve ser maior que zero'), descricao: zTextOpt }),
@@ -105,6 +113,7 @@ router.post(
         descricao: d.descricao,
         usuario_id: req.usuario.id,
       });
+      await registrar(client, req, d.tipo, { entidade: 'caixa', entidadeId: caixa.id, detalhes: { valor: d.valor, descricao: d.descricao ?? null } });
     });
     res.status(201).json({ ok: true });
   })
@@ -112,6 +121,7 @@ router.post(
 
 router.post(
   '/fechar',
+  exigir('caixa.operar'),
   ah(async (req, res) => {
     const d = parse(z.object({ valor_informado: zMoney, observacoes: zTextOpt }), req.body);
     const fechado = await transaction(async (client) => {
@@ -123,7 +133,13 @@ router.post(
           where id = $5 returning *`,
         [req.usuario.id, d.valor_informado, resumo.dinheiro_esperado, d.observacoes ?? null, caixa.id]
       );
-      return { ...rows[0], diferenca: round2(d.valor_informado - resumo.dinheiro_esperado) };
+      const diferenca = round2(d.valor_informado - resumo.dinheiro_esperado);
+      await registrar(client, req, 'caixa_fechado', {
+        entidade: 'caixa',
+        entidadeId: caixa.id,
+        detalhes: { esperado: resumo.dinheiro_esperado, contado: d.valor_informado, diferenca },
+      });
+      return { ...rows[0], diferenca };
     });
     res.json(fechado);
   })

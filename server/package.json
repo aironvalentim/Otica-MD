@@ -9,7 +9,7 @@
     "start": "node src/index.js",
     "db:setup": "node scripts/setup-db.js",
     "db:seed": "node scripts/seed.js",
-    "test": "node test/fluxo.test.js && node test/precos.test.js"
+    "test": "node test/fluxo.test.js && node test/precos.test.js && node test/permissoes.test.js"
   },
   "engines": {
     "node": ">=20"
@@ -25,7 +25,6 @@
     "helmet": "^7.1.0",
     "jsonwebtoken": "^9.0.2",
     "multer": "^1.4.5-lts.1",
-    "otica-md": "file:..",
     "pg": "^8.12.0",
     "zod": "^3.23.8"
   }

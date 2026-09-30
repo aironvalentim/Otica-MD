@@ -1,7 +1,8 @@
 const router = require('express').Router();
 const { query } = require('../db');
 const { ah, parse, z } = require('../util');
-const { somenteAdmin } = require('../auth');
+const { exigir } = require('../auth');
+const { registrar } = require('../auditoria');
 
 router.get(
   '/',
@@ -13,7 +14,7 @@ router.get(
 
 router.put(
   '/',
-  somenteAdmin,
+  exigir('config.loja'),
   ah(async (req, res) => {
     const d = parse(z.record(z.string().regex(/^[a-z_]+$/), z.string().max(500)), req.body);
     for (const [chave, valor] of Object.entries(d)) {
@@ -22,6 +23,7 @@ router.put(
         [chave, valor]
       );
     }
+    await registrar({ query }, req, 'configuracoes_alteradas', { detalhes: d });
     res.json({ ok: true });
   })
 );

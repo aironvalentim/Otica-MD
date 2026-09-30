@@ -4,7 +4,7 @@ const { ah } = require('../util');
 
 router.get(
   '/',
-  ah(async (_req, res) => {
+  ah(async (req, res) => {
     const [vendas, serie, os, cred, estoque, agend, lembretes, top, caixa] = await Promise.all([
       query(
         `select
@@ -61,19 +61,22 @@ router.get(
          from venda_itens vi join vendas v on v.id = vi.venda_id
         where v.status = 'concluida' and v.criado_em >= date_trunc('month', now())`
     );
+    const pode = req.pode;
+    const financeiro = pode('relatorios.financeiro');
     res.json({
-      vendas: {
+      pode_financeiro: financeiro,
+      vendas: !financeiro ? null : {
         ...m,
         ticket_medio_mes: m.mes_qtd ? m.mes_total / m.mes_qtd : 0,
         margem_bruta_mes: m.mes_total - custoMes.rows[0].custo,
       },
-      serie_30_dias: serie.rows,
-      os_por_status: os.rows,
-      crediario: cred.rows[0],
-      estoque_baixo: estoque.rows,
-      agendamentos_novos: agend.rows[0].novos,
-      lembretes_troca: lembretes.rows[0].qtd,
-      mais_vendidos_mes: top.rows,
+      serie_30_dias: financeiro ? serie.rows : null,
+      os_por_status: pode('os.gerenciar') ? os.rows : null,
+      crediario: financeiro || pode('crediario.receber') ? cred.rows[0] : null,
+      estoque_baixo: pode('estoque.movimentar') || pode('produtos.editar') ? estoque.rows : null,
+      agendamentos_novos: pode('agendamentos.gerenciar') ? agend.rows[0].novos : null,
+      lembretes_troca: pode('clientes.gerenciar') ? lembretes.rows[0].qtd : null,
+      mais_vendidos_mes: financeiro ? top.rows : null,
       caixa_aberto: caixa.rows[0] || null,
     });
   })

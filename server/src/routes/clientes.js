@@ -1,6 +1,10 @@
 const router = require('express').Router();
 const { query } = require('../db');
 const { ah, parse, z, zId, zTextOpt, zDateOpt, buildUpdate, HttpError } = require('../util');
+const { exigir } = require('../auth');
+
+// O PDV também precisa buscar e cadastrar clientes
+router.use(exigir('clientes.gerenciar', 'vendas.criar'));
 
 const soDigitos = (v) => (v ? String(v).replace(/\D/g, '') : v);
 

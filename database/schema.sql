@@ -323,3 +323,44 @@ insert into configuracoes (chave, valor) values
   ('markup_servico', '1'),
   ('preco_arredondamento', 'x90')
 on conflict (chave) do nothing;
+
+-- ---------------------------------------------------------------------
+-- Perfis de acesso (o que cada usuário pode ver e fazer no painel)
+-- ---------------------------------------------------------------------
+create table if not exists perfis (
+  id               integer generated always as identity primary key,
+  nome             text not null unique,
+  descricao        text,
+  permissoes       jsonb not null default '[]'::jsonb,   -- lista de chaves; '*' = todas
+  desconto_max_pct numeric(5,2) not null default 100 check (desconto_max_pct between 0 and 100),
+  sistema          boolean not null default false,        -- perfil Administrador: não pode ser editado nem excluído
+  criado_em        timestamptz not null default now()
+);
+
+insert into perfis (nome, descricao, permissoes, desconto_max_pct, sistema) values
+  ('Administrador', 'Acesso total ao sistema', '["*"]', 100, true),
+  ('Vendedor', 'Atendimento, vendas e caixa, sem custos nem relatórios financeiros',
+   '["vendas.criar","vendas.ver","caixa.operar","crediario.receber","clientes.gerenciar","os.gerenciar","agendamentos.gerenciar","etiquetas.imprimir"]', 10, false)
+on conflict (nome) do nothing;
+
+alter table usuarios add column if not exists perfil_id integer references perfis(id) on delete restrict;
+alter table usuarios add column if not exists ultimo_acesso timestamptz;
+update usuarios set perfil_id = (select id from perfis where nome = 'Administrador') where perfil_id is null and papel = 'admin';
+update usuarios set perfil_id = (select id from perfis where nome = 'Vendedor') where perfil_id is null;
+
+-- ---------------------------------------------------------------------
+-- Log de ações (auditoria)
+-- ---------------------------------------------------------------------
+create table if not exists auditoria (
+  id           integer generated always as identity primary key,
+  usuario_id   integer references usuarios(id) on delete set null,
+  usuario_nome text,
+  acao         text not null,
+  entidade     text,
+  entidade_id  integer,
+  detalhes     jsonb,
+  ip           text,
+  criado_em    timestamptz not null default now()
+);
+create index if not exists idx_auditoria_data on auditoria(criado_em desc);
+create index if not exists idx_auditoria_usuario on auditoria(usuario_id, criado_em desc);

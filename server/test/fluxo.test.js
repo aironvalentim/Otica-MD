@@ -129,7 +129,9 @@ async function api(method, path, body, esperado) {
   assert.equal((await api('GET', '/caixa/atual', null, 200)).data, null);
 
   // usuários
-  await api('POST', '/usuarios', { nome: 'Vendedora', email: 'vend@oticamd.com.br', senha: '12345678', papel: 'vendedor' }, 201);
+  const perfis = (await api('GET', '/perfis', null, 200)).data;
+  const vendedor = perfis.find((p) => p.nome === 'Vendedor');
+  await api('POST', '/usuarios', { nome: 'Vendedora', email: 'vend@oticamd.com.br', senha: '12345678', perfil_id: vendedor.id }, 201);
   const tokAdmin = token;
   token = (await api('POST', '/auth/login', { email: 'vend@oticamd.com.br', senha: '12345678' }, 200)).data.token;
   assert.equal((await api('GET', '/usuarios')).status, 403);

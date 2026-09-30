@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { ArrowDownToLine, ArrowUpFromLine, ClipboardList, FileText, Trash2 } from 'lucide-react';
 import { api, qs } from '../../lib/api';
 import { useApi } from '../../lib/hooks';
+import { useAuth } from '../../lib/auth';
 import { CATEGORIAS, MOTIVOS_MOV, dataHora, moeda } from '../../lib/format';
 import { Botao, Cabecalho, Campo, Cartao, Erro, Modal, Tabela, useToast } from '../../components/admin/ui';
 import ProdutoBusca from '../../components/admin/ProdutoBusca';
@@ -13,8 +14,17 @@ const MOTIVOS = {
 
 function FormMovimentacao({ tipo, fornecedores, onSalvo }) {
   const avisar = useToast();
+  const podeCusto = useAuth().pode('custos.ver');
   const [produto, setProduto] = useState(null);
-  const [f, setF] = useState({ motivo: tipo === 'ajuste' ? '' : MOTIVOS[tipo][0], quantidade: 1, custo_unitario: '', fornecedor_id: '', documento: '', observacao: '', novo_estoque: '' });
+  const [f, setF] = useState({
+    motivo: tipo === 'ajuste' ? '' : MOTIVOS[tipo][0],
+    quantidade: 1,
+    custo_unitario: '',
+    fornecedor_id: '',
+    documento: '',
+    observacao: '',
+    novo_estoque: '',
+  });
   const [erro, setErro] = useState('');
   const [salvando, setSalvando] = useState(false);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
@@ -84,7 +94,7 @@ function FormMovimentacao({ tipo, fornecedores, onSalvo }) {
           <Campo label="Quantidade">
             <input required type="number" min="1" value={f.quantidade} onChange={set('quantidade')} className="campo" />
           </Campo>
-          {tipo === 'entrada' && (
+          {tipo === 'entrada' && podeCusto && (
             <Campo label="Custo unitário (R$)" dica="Atualiza o custo médio">
               <input type="number" step="0.01" min="0" value={f.custo_unitario} onChange={set('custo_unitario')} className="campo" />
             </Campo>
@@ -117,13 +127,16 @@ function FormMovimentacao({ tipo, fornecedores, onSalvo }) {
 
 function FormNota({ fornecedores, onSalvo }) {
   const avisar = useToast();
+  const podeCusto = useAuth().pode('custos.ver');
   const [itens, setItens] = useState([]);
   const [cab, setCab] = useState({ fornecedor_id: '', documento: '', observacao: '' });
   const [erro, setErro] = useState('');
   const [salvando, setSalvando] = useState(false);
 
   const add = (p) =>
-    setItens((l) => (l.some((i) => i.produto.id === p.id) ? l : [...l, { produto: p, quantidade: 1, custo_unitario: p.preco_custo || '' }]));
+    setItens((l) =>
+      l.some((i) => i.produto.id === p.id) ? l : [...l, { produto: p, quantidade: 1, custo_unitario: p.preco_custo || '' }],
+    );
   const setItem = (idx, k, v) => setItens((l) => l.map((i, n) => (n === idx ? { ...i, [k]: v } : i)));
   const total = itens.reduce((s, i) => s + Number(i.quantidade || 0) * Number(i.custo_unitario || 0), 0);
 
@@ -133,7 +146,11 @@ function FormNota({ fornecedores, onSalvo }) {
     try {
       await api.post('/estoque/entrada-lote', {
         ...cab,
-        itens: itens.map((i) => ({ produto_id: i.produto.id, quantidade: i.quantidade, custo_unitario: i.custo_unitario === '' ? null : i.custo_unitario })),
+        itens: itens.map((i) => ({
+          produto_id: i.produto.id,
+          quantidade: i.quantidade,
+          custo_unitario: i.custo_unitario === '' ? null : i.custo_unitario,
+        })),
       });
       avisar(`Nota lançada: ${itens.length} item(ns)`);
       onSalvo();
@@ -168,7 +185,7 @@ function FormNota({ fornecedores, onSalvo }) {
             <tr>
               <th className="py-1 text-left font-medium">Produto</th>
               <th className="w-20 py-1 font-medium">Qtd.</th>
-              <th className="w-28 py-1 font-medium">Custo un.</th>
+              {podeCusto && <th className="w-28 py-1 font-medium">Custo un.</th>}
               <th />
             </tr>
           </thead>
@@ -179,13 +196,32 @@ function FormNota({ fornecedores, onSalvo }) {
                   {i.produto.nome} <span className="text-xs text-slate-500">{i.produto.cor}</span>
                 </td>
                 <td className="px-1">
-                  <input type="number" min="1" value={i.quantidade} onChange={(e) => setItem(idx, 'quantidade', e.target.value)} className="campo py-1" />
+                  <input
+                    type="number"
+                    min="1"
+                    value={i.quantidade}
+                    onChange={(e) => setItem(idx, 'quantidade', e.target.value)}
+                    className="campo py-1"
+                  />
                 </td>
-                <td className="px-1">
-                  <input type="number" step="0.01" min="0" value={i.custo_unitario} onChange={(e) => setItem(idx, 'custo_unitario', e.target.value)} className="campo py-1" />
-                </td>
+                {podeCusto && (
+                  <td className="px-1">
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={i.custo_unitario}
+                      onChange={(e) => setItem(idx, 'custo_unitario', e.target.value)}
+                      className="campo py-1"
+                    />
+                  </td>
+                )}
                 <td>
-                  <button onClick={() => setItens(itens.filter((_, n) => n !== idx))} className="p-1 text-slate-400 hover:text-red-600" aria-label="Remover">
+                  <button
+                    onClick={() => setItens(itens.filter((_, n) => n !== idx))}
+                    className="p-1 text-slate-400 hover:text-red-600"
+                    aria-label="Remover"
+                  >
                     <Trash2 size={15} />
                   </button>
                 </td>
@@ -194,9 +230,11 @@ function FormNota({ fornecedores, onSalvo }) {
           </tbody>
         </table>
       )}
-      <p className="text-right text-sm">
-        Total da nota: <strong>{moeda(total)}</strong>
-      </p>
+      {podeCusto && (
+        <p className="text-right text-sm">
+          Total da nota: <strong>{moeda(total)}</strong>
+        </p>
+      )}
       <Erro>{erro}</Erro>
       <Botao onClick={salvar} disabled={!itens.length} carregando={salvando} className="w-full">
         Lançar entrada
@@ -206,6 +244,7 @@ function FormNota({ fornecedores, onSalvo }) {
 }
 
 export default function Estoque() {
+  const podeCusto = useAuth().pode('custos.ver');
   const [modal, setModal] = useState(null);
   const [filtro, setFiltro] = useState({ tipo: '', de: '', ate: '' });
   const { dados: movs, recarregar } = useApi(`/estoque/movimentacoes${qs(filtro)}`);
@@ -248,14 +287,16 @@ export default function Estoque() {
               { titulo: 'Categoria', render: (r) => CATEGORIAS[r.categoria] },
               { titulo: 'Produtos', direita: true, campo: 'produtos' },
               { titulo: 'Unidades', direita: true, campo: 'unidades' },
-              { titulo: 'A preço de custo', direita: true, render: (r) => moeda(r.valor_custo) },
+              podeCusto && { titulo: 'A preço de custo', direita: true, render: (r) => moeda(r.valor_custo) },
               { titulo: 'A preço de venda', direita: true, render: (r) => moeda(r.valor_venda) },
-            ]}
+            ].filter(Boolean)}
           />
           <div className="flex justify-end gap-8 border-t border-slate-100 px-4 py-3 text-sm">
-            <span>
-              Custo total: <strong>{moeda(totCusto)}</strong>
-            </span>
+            {podeCusto && (
+              <span>
+                Custo total: <strong>{moeda(totCusto)}</strong>
+              </span>
+            )}
             <span>
               Venda total: <strong>{moeda(totVenda)}</strong>
             </span>
@@ -272,10 +313,17 @@ export default function Estoque() {
             <option value="ajuste">Só ajustes</option>
           </select>
           <label className="flex items-center gap-2 text-sm text-slate-600">
-            de <input type="date" value={filtro.de} onChange={(e) => setFiltro({ ...filtro, de: e.target.value })} className="campo w-auto" />
+            de{' '}
+            <input type="date" value={filtro.de} onChange={(e) => setFiltro({ ...filtro, de: e.target.value })} className="campo w-auto" />
           </label>
           <label className="flex items-center gap-2 text-sm text-slate-600">
-            até <input type="date" value={filtro.ate} onChange={(e) => setFiltro({ ...filtro, ate: e.target.value })} className="campo w-auto" />
+            até{' '}
+            <input
+              type="date"
+              value={filtro.ate}
+              onChange={(e) => setFiltro({ ...filtro, ate: e.target.value })}
+              className="campo w-auto"
+            />
           </label>
         </div>
         <Tabela
@@ -306,12 +354,21 @@ export default function Estoque() {
             { titulo: 'Qtd.', direita: true, campo: 'quantidade' },
             { titulo: 'Saldo', direita: true, render: (m) => `${m.estoque_anterior} → ${m.estoque_posterior}` },
             { titulo: 'Por', render: (m) => <span className="text-xs text-slate-500">{m.usuario_nome || '—'}</span> },
-            { titulo: 'Obs.', render: (m) => <span className="text-xs text-slate-500">{[m.fornecedor_nome, m.documento, m.observacao].filter(Boolean).join(' · ')}</span> },
+            {
+              titulo: 'Obs.',
+              render: (m) => (
+                <span className="text-xs text-slate-500">{[m.fornecedor_nome, m.documento, m.observacao].filter(Boolean).join(' · ')}</span>
+              ),
+            },
           ]}
         />
       </Cartao>
 
-      <Modal aberto={['entrada', 'saida', 'ajuste'].includes(modal)} onFechar={fechar} titulo={{ entrada: 'Entrada de estoque', saida: 'Saída de estoque', ajuste: 'Ajuste de inventário' }[modal]}>
+      <Modal
+        aberto={['entrada', 'saida', 'ajuste'].includes(modal)}
+        onFechar={fechar}
+        titulo={{ entrada: 'Entrada de estoque', saida: 'Saída de estoque', ajuste: 'Ajuste de inventário' }[modal]}
+      >
         {modal && modal !== 'nota' && <FormMovimentacao key={modal} tipo={modal} fornecedores={fornecedores} onSalvo={salvo} />}
       </Modal>
       <Modal aberto={modal === 'nota'} onFechar={fechar} titulo="Entrada de nota de compra" largura="max-w-2xl">

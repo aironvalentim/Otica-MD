@@ -38,6 +38,8 @@ app.use('/api/publico', require('./routes/publico'));
 // Rotas do painel (exigem login)
 app.use('/api', autenticar);
 app.use('/api/usuarios', require('./routes/usuarios'));
+app.use('/api/perfis', require('./routes/perfis'));
+app.use('/api/auditoria', require('./routes/auditoria'));
 app.use('/api/dashboard', require('./routes/dashboard'));
 app.use('/api/produtos', require('./routes/produtos'));
 app.use('/api/fornecedores', require('./routes/fornecedores'));

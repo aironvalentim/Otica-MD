@@ -1,5 +1,5 @@
-// Cria as tabelas e o primeiro usuário administrador.
-// Uso: npm run db:setup  (lê DATABASE_URL e ADMIN_* do .env)
+// Cria/atualiza as tabelas e o primeiro usuário administrador.
+// Uso: npm run db:setup  (lê DATABASE_URL e ADMIN_* do .env). Pode rodar quantas vezes quiser.
 require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
@@ -18,11 +18,11 @@ const { pool } = require('../src/db');
     if (rows[0]) {
       console.log(`Usuário ${ADMIN_EMAIL} já existe.`);
     } else {
-      await pool.query(`insert into usuarios (nome, email, senha_hash, papel) values ($1,$2,$3,'admin')`, [
-        ADMIN_NOME,
-        ADMIN_EMAIL.toLowerCase(),
-        await bcrypt.hash(ADMIN_SENHA, 10),
-      ]);
+      await pool.query(
+        `insert into usuarios (nome, email, senha_hash, papel, perfil_id)
+         values ($1, $2, $3, 'admin', (select id from perfis where nome = 'Administrador'))`,
+        [ADMIN_NOME, ADMIN_EMAIL.toLowerCase(), await bcrypt.hash(ADMIN_SENHA, 10)]
+      );
       console.log(`Administrador ${ADMIN_EMAIL} criado.`);
     }
   } else {

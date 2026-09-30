@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { MessageCircle } from 'lucide-react';
 import { api, qs } from '../../lib/api';
 import { useApi } from '../../lib/hooks';
+import { useAuth } from '../../lib/auth';
 import { FORMAS_PAGAMENTO, data, linkWhatsApp, moeda } from '../../lib/format';
 import { Botao, Cabecalho, Campo, Cartao, Erro, Etiqueta, Indicador, Modal, Tabela, useToast } from '../../components/admin/ui';
 
@@ -58,17 +59,26 @@ export default function Crediario() {
   const [status, setStatus] = useState('aberta');
   const clienteId = params.get('cliente_id') || '';
   const { dados, recarregar } = useApi(`/crediario/parcelas${qs({ status, situacao, cliente_id: clienteId })}`);
-  const { dados: resumo, recarregar: recarregarResumo } = useApi('/crediario/resumo');
+  const { pode } = useAuth();
+  const { dados: resumo, recarregar: recarregarResumo } = useApi(pode('relatorios.financeiro') ? '/crediario/resumo' : null);
   const [receber, setReceber] = useState(null);
 
   return (
     <>
-      <Cabecalho titulo="Crediário" subtitulo={clienteId && dados?.[0] ? `Cliente: ${dados[0].cliente_nome}` : 'Carnês e contas a receber da loja'} />
+      <Cabecalho
+        titulo="Crediário"
+        subtitulo={clienteId && dados?.[0] ? `Cliente: ${dados[0].cliente_nome}` : 'Carnês e contas a receber da loja'}
+      />
 
       {resumo && (
         <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
           <Indicador titulo="A receber" valor={moeda(resumo.a_receber)} />
-          <Indicador titulo="Em atraso" valor={moeda(resumo.atrasado)} cor={resumo.atrasado > 0 ? 'text-red-600' : 'text-ink'} detalhe={`${resumo.parcelas_atrasadas} parcela(s) · ${resumo.clientes_atrasados} cliente(s)`} />
+          <Indicador
+            titulo="Em atraso"
+            valor={moeda(resumo.atrasado)}
+            cor={resumo.atrasado > 0 ? 'text-red-600' : 'text-ink'}
+            detalhe={`${resumo.parcelas_atrasadas} parcela(s) · ${resumo.clientes_atrasados} cliente(s)`}
+          />
           <Indicador titulo="Recebido no mês" valor={moeda(resumo.recebido_mes)} />
           <Indicador
             titulo="Inadimplência"
@@ -122,7 +132,8 @@ export default function Crediario() {
               titulo: 'Vencimento',
               render: (p) => (
                 <span>
-                  {data(p.vencimento)} {p.status === 'aberta' && p.dias_atraso > 0 && <Etiqueta cor="red">{p.dias_atraso}d atraso</Etiqueta>}
+                  {data(p.vencimento)}{' '}
+                  {p.status === 'aberta' && p.dias_atraso > 0 && <Etiqueta cor="red">{p.dias_atraso}d atraso</Etiqueta>}
                 </span>
               ),
             },
@@ -137,7 +148,7 @@ export default function Crediario() {
                       <a
                         href={linkWhatsApp(
                           p.cliente_telefone,
-                          `Olá, ${p.cliente_nome.split(' ')[0]}! Aqui é da Ótica MD. Passando para lembrar da parcela ${p.numero}/${p.total_parcelas} no valor de ${moeda(p.valor)}, com vencimento em ${data(p.vencimento)}. Qualquer dúvida, estamos à disposição.`
+                          `Olá, ${p.cliente_nome.split(' ')[0]}! Aqui é da Ótica MD. Passando para lembrar da parcela ${p.numero}/${p.total_parcelas} no valor de ${moeda(p.valor)}, com vencimento em ${data(p.vencimento)}. Qualquer dúvida, estamos à disposição.`,
                         )}
                         target="_blank"
                         rel="noreferrer"
@@ -146,12 +157,16 @@ export default function Crediario() {
                         <MessageCircle size={13} /> Lembrar
                       </a>
                     )}
-                    <Botao tamanho="sm" onClick={() => setReceber(p)}>
-                      Receber
-                    </Botao>
+                    {pode('crediario.receber') && (
+                      <Botao tamanho="sm" onClick={() => setReceber(p)}>
+                        Receber
+                      </Botao>
+                    )}
                   </div>
                 ) : (
-                  <Etiqueta cor={p.status === 'paga' ? 'green' : 'zinc'}>{p.status === 'paga' ? `paga ${data(p.pago_em)}` : p.status}</Etiqueta>
+                  <Etiqueta cor={p.status === 'paga' ? 'green' : 'zinc'}>
+                    {p.status === 'paga' ? `paga ${data(p.pago_em)}` : p.status}
+                  </Etiqueta>
                 ),
             },
           ]}

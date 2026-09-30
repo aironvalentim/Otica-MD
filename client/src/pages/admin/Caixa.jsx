@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { ArrowDownCircle, ArrowUpCircle, Lock, Unlock } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useApi } from '../../lib/hooks';
+import { useAuth } from '../../lib/auth';
 import { FORMAS_PAGAMENTO, dataHora, moeda } from '../../lib/format';
 import { Botao, Cabecalho, Campo, Cartao, Erro, Indicador, Modal, Tabela, useToast } from '../../components/admin/ui';
 
@@ -34,7 +35,16 @@ function FormValor({ label, botao, variante, onConfirmar, extra }) {
     <form onSubmit={ok} className="space-y-4">
       {extra}
       <Campo label={label}>
-        <input autoFocus required type="number" step="0.01" min="0" value={valor} onChange={(e) => setValor(e.target.value)} className="campo text-lg" />
+        <input
+          autoFocus
+          required
+          type="number"
+          step="0.01"
+          min="0"
+          value={valor}
+          onChange={(e) => setValor(e.target.value)}
+          className="campo text-lg"
+        />
       </Campo>
       <Campo label="Observação">
         <input value={texto} onChange={(e) => setTexto(e.target.value)} className="campo" />
@@ -49,8 +59,11 @@ function FormValor({ label, botao, variante, onConfirmar, extra }) {
 
 export default function Caixa() {
   const avisar = useToast();
+  const { pode } = useAuth();
+  const operar = pode('caixa.operar');
+  const financeiro = pode('relatorios.financeiro');
   const { dados: cx, recarregar, carregando } = useApi('/caixa/atual');
-  const { dados: historico, recarregar: recarregarHist } = useApi('/caixa');
+  const { dados: historico, recarregar: recarregarHist } = useApi(financeiro ? '/caixa' : null);
   const [modal, setModal] = useState(null);
   const [resultado, setResultado] = useState(null);
 
@@ -65,7 +78,7 @@ export default function Caixa() {
   return (
     <>
       <Cabecalho titulo="Caixa" subtitulo={cx ? `Aberto por ${cx.aberto_por_nome} em ${dataHora(cx.aberto_em)}` : 'Nenhum caixa aberto'}>
-        {cx ? (
+        {!operar ? null : cx ? (
           <>
             <Botao variante="secundario" onClick={() => setModal('suprimento')}>
               <ArrowDownCircle size={16} /> Suprimento
@@ -85,10 +98,17 @@ export default function Caixa() {
       </Cabecalho>
 
       {resultado && (
-        <div className={`mb-6 rounded-lg px-4 py-3 text-sm ${Math.abs(resultado.diferenca) < 0.01 ? 'bg-green-50 text-green-800' : 'bg-amber-50 text-amber-900'}`}>
-          Caixa #{resultado.id} fechado. Esperado em dinheiro: {moeda(resultado.valor_fechamento_calculado)} · Contado: {moeda(resultado.valor_fechamento_informado)} ·{' '}
+        <div
+          className={`mb-6 rounded-lg px-4 py-3 text-sm ${Math.abs(resultado.diferenca) < 0.01 ? 'bg-green-50 text-green-800' : 'bg-amber-50 text-amber-900'}`}
+        >
+          Caixa #{resultado.id} fechado. Esperado em dinheiro: {moeda(resultado.valor_fechamento_calculado)} · Contado:{' '}
+          {moeda(resultado.valor_fechamento_informado)} ·{' '}
           <strong>
-            {Math.abs(resultado.diferenca) < 0.01 ? 'Sem diferença' : resultado.diferenca > 0 ? `Sobra de ${moeda(resultado.diferenca)}` : `Falta de ${moeda(-resultado.diferenca)}`}
+            {Math.abs(resultado.diferenca) < 0.01
+              ? 'Sem diferença'
+              : resultado.diferenca > 0
+                ? `Sobra de ${moeda(resultado.diferenca)}`
+                : `Falta de ${moeda(-resultado.diferenca)}`}
           </strong>
         </div>
       )}
@@ -124,26 +144,30 @@ export default function Caixa() {
         </>
       )}
 
-      <Cartao titulo="Caixas anteriores" className="mt-6" semPadding>
-        <Tabela
-          linhas={historico?.filter((h) => h.fechado_em)}
-          vazio="Nenhum caixa fechado ainda."
-          colunas={[
-            { titulo: '#', render: (h) => `#${h.id}` },
-            { titulo: 'Abertura', render: (h) => `${dataHora(h.aberto_em)} · ${h.aberto_por_nome || ''}` },
-            { titulo: 'Fechamento', render: (h) => `${dataHora(h.fechado_em)} · ${h.fechado_por_nome || ''}` },
-            { titulo: 'Vendas', direita: true, render: (h) => moeda(h.total_vendas) },
-            {
-              titulo: 'Diferença',
-              direita: true,
-              render: (h) => {
-                const d = (h.valor_fechamento_informado || 0) - (h.valor_fechamento_calculado || 0);
-                return <span className={Math.abs(d) < 0.01 ? 'text-slate-500' : d > 0 ? 'text-green-700' : 'text-red-600'}>{moeda(d)}</span>;
+      {financeiro && (
+        <Cartao titulo="Caixas anteriores" className="mt-6" semPadding>
+          <Tabela
+            linhas={historico?.filter((h) => h.fechado_em)}
+            vazio="Nenhum caixa fechado ainda."
+            colunas={[
+              { titulo: '#', render: (h) => `#${h.id}` },
+              { titulo: 'Abertura', render: (h) => `${dataHora(h.aberto_em)} · ${h.aberto_por_nome || ''}` },
+              { titulo: 'Fechamento', render: (h) => `${dataHora(h.fechado_em)} · ${h.fechado_por_nome || ''}` },
+              { titulo: 'Vendas', direita: true, render: (h) => moeda(h.total_vendas) },
+              {
+                titulo: 'Diferença',
+                direita: true,
+                render: (h) => {
+                  const d = (h.valor_fechamento_informado || 0) - (h.valor_fechamento_calculado || 0);
+                  return (
+                    <span className={Math.abs(d) < 0.01 ? 'text-slate-500' : d > 0 ? 'text-green-700' : 'text-red-600'}>{moeda(d)}</span>
+                  );
+                },
               },
-            },
-          ]}
-        />
-      </Cartao>
+            ]}
+          />
+        </Cartao>
+      )}
 
       <Modal aberto={modal === 'abrir'} onFechar={() => setModal(null)} titulo="Abrir caixa">
         <FormValor
@@ -157,7 +181,11 @@ export default function Caixa() {
           }}
         />
       </Modal>
-      <Modal aberto={modal === 'suprimento' || modal === 'sangria'} onFechar={() => setModal(null)} titulo={modal === 'sangria' ? 'Sangria (retirada)' : 'Suprimento (entrada de troco)'}>
+      <Modal
+        aberto={modal === 'suprimento' || modal === 'sangria'}
+        onFechar={() => setModal(null)}
+        titulo={modal === 'sangria' ? 'Sangria (retirada)' : 'Suprimento (entrada de troco)'}
+      >
         <FormValor
           key={modal}
           label="Valor em dinheiro (R$)"
@@ -174,7 +202,11 @@ export default function Caixa() {
           label="Dinheiro contado na gaveta (R$)"
           botao="Fechar caixa"
           variante="perigo"
-          extra={<p className="text-sm text-slate-600">Conte as notas e moedas e informe o total. O sistema compara com o esperado e mostra sobra ou falta.</p>}
+          extra={
+            <p className="text-sm text-slate-600">
+              Conte as notas e moedas e informe o total. O sistema compara com o esperado e mostra sobra ou falta.
+            </p>
+          }
           onConfirmar={async (valor, obs) => {
             const r = await api.post('/caixa/fechar', { valor_informado: valor, observacoes: obs });
             setResultado(r);

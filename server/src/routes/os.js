@@ -1,6 +1,9 @@
 const router = require('express').Router();
 const { query, transaction } = require('../db');
 const { ah, parse, z, zId, zIdOpt, zTextOpt, zDateOpt, buildUpdate, HttpError } = require('../util');
+const { exigir } = require('../auth');
+
+router.use(exigir('os.gerenciar'));
 
 const STATUS = ['aberta', 'enviada_laboratorio', 'em_montagem', 'pronta', 'entregue', 'cancelada'];
 

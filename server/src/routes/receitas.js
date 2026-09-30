@@ -1,6 +1,9 @@
 const router = require('express').Router();
 const { query } = require('../db');
 const { ah, parse, z, zId, zTextOpt, zDateOpt, buildUpdate, hoje, HttpError } = require('../util');
+const { exigir } = require('../auth');
+
+router.use(exigir('clientes.gerenciar', 'vendas.criar'));
 
 // Grau: múltiplos de 0,25 entre -30 e +30
 const zGrau = z.coerce
